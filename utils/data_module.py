@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import DataLoader, Subset
 from datasets.fmri_datasets import HCP1200, ABCD, UKB, Cobre, ADHD200, UCLA, HCPEP, HCPTASK, GOD, MOVIE, TransDiag
+from datasets.adni_dataset import ADNIDataset
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from .parser import str2bool
 
@@ -67,13 +68,15 @@ class fMRIDataModule(pl.LightningDataModule):
         elif self.hparams.dataset_name == 'HCPEP':
             return HCPEP
         elif self.hparams.dataset_name == 'GOD':
-            return GOD 
+            return GOD
         elif self.hparams.dataset_name == 'HCPTASK':
             return HCPTASK
         elif self.hparams.dataset_name == 'MOVIE':
             return MOVIE
         elif self.hparams.dataset_name == 'TransDiag':
             return TransDiag
+        elif self.hparams.dataset_name == 'ADNI':
+            return ADNIDataset
         else:
             raise NotImplementedError
 
@@ -507,56 +510,91 @@ class fMRIDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         Dataset = self.get_dataset()
-        params = {
-                "root": self.hparams.image_path,
-                "img_size": self.hparams.img_size,
+
+        # Special handling for ADNI dataset (uses predefined train/val/test txt files)
+        if self.hparams.dataset_name == 'ADNI':
+            # ADNI uses direct file loading from txt files
+            train_file = os.path.join(self.hparams.image_path, 'train.txt')
+            val_file = os.path.join(self.hparams.image_path, 'val.txt')
+            test_file = os.path.join(self.hparams.image_path, 'test.txt')
+
+            # Check if files exist
+            for f in [train_file, val_file, test_file]:
+                if not os.path.exists(f):
+                    raise FileNotFoundError(f"ADNI data split file not found: {f}")
+
+            # Create datasets with ADNI-specific parameters
+            adni_params = {
                 "sequence_length": self.hparams.sequence_length,
-                "contrastive": self.hparams.use_contrastive,
-                "contrastive_type": self.hparams.contrastive_type,
-                "mae": self.hparams.use_mae,
-                "stride_between_seq": self.hparams.stride_between_seq,
-                "stride_within_seq": self.hparams.stride_within_seq,
-                "with_voxel_norm": self.hparams.with_voxel_norm,
-                "downstream_task_id": self.hparams.downstream_task_id,
-                "task_name": self.hparams.task_name,
-                "shuffle_time_sequence": self.hparams.shuffle_time_sequence,
-                "label_scaling_method": self.hparams.label_scaling_method,
-                "dtype": 'float16'}
-        
-        subject_dict = self.make_subject_dict()
-        
-        if os.path.exists(self.split_file_path):
-            train_names, val_names, test_names = self.load_split()
+                "stride": self.hparams.stride_between_seq,
+                "augmentation": self.hparams.use_augmentation if hasattr(self.hparams, 'use_augmentation') else False,
+                "normalize": 'none'  # ADNI data is already normalized (zscore in filename)
+            }
+
+            self.train_dataset = Dataset(data_list_file=train_file, train=True, **adni_params)
+            self.val_dataset = Dataset(data_list_file=val_file, train=False, **adni_params)
+            self.test_dataset = Dataset(data_list_file=test_file, train=False, **adni_params)
+
+            print("\n" + "="*80)
+            print("ADNI Dataset Setup Complete")
+            print("="*80)
+            print(f"Train samples: {len(self.train_dataset)}")
+            print(f"Val samples: {len(self.val_dataset)}")
+            print(f"Test samples: {len(self.test_dataset)}")
+            print("="*80 + "\n")
+
         else:
-            train_names, val_names, test_names = self.determine_split_randomly(subject_dict)
-        
-        if self.hparams.bad_subj_path:
-            bad_subjects = open(self.hparams.bad_subj_path, "r").readlines()
-            for bad_subj in bad_subjects:
-                bad_subj = bad_subj.strip()
-                if bad_subj in list(subject_dict.keys()):
-                    print(f'removing bad subject: {bad_subj}')
-                    del subject_dict[bad_subj]
-        
-        if self.hparams.limit_training_samples:
-            selected_num = int(self.hparams.limit_training_samples * len(train_names))
-            train_names = np.random.choice(train_names, size=selected_num, replace=False, p=None)
-        
-        train_dict = {key: subject_dict[key] for key in train_names if key in subject_dict}
-        val_dict = {key: subject_dict[key] for key in val_names if key in subject_dict}
-        test_dict = {key: subject_dict[key] for key in test_names if key in subject_dict}
-        
-        self.train_dataset = Dataset(**params, subject_dict=train_dict, use_augmentations=False, train=True)
-        self.val_dataset = Dataset(**params, subject_dict=val_dict, use_augmentations=False, train=False) 
-        self.test_dataset = Dataset(**params, subject_dict=test_dict, use_augmentations=False, train=False)
-        
-        print("number of train subjects:", len(train_dict))
-        print("number of val subjects:", len(val_dict))
-        print("number of test subjects:", len(test_dict))
-        print("number of train samples:", len(self.train_dataset.data))
-        print("number of val samples:", len(self.val_dataset.data))  
-        print("number of test samples:", len(self.test_dataset.data))
-        
+            # Original logic for other datasets
+            params = {
+                    "root": self.hparams.image_path,
+                    "img_size": self.hparams.img_size,
+                    "sequence_length": self.hparams.sequence_length,
+                    "contrastive": self.hparams.use_contrastive,
+                    "contrastive_type": self.hparams.contrastive_type,
+                    "mae": self.hparams.use_mae,
+                    "stride_between_seq": self.hparams.stride_between_seq,
+                    "stride_within_seq": self.hparams.stride_within_seq,
+                    "with_voxel_norm": self.hparams.with_voxel_norm,
+                    "downstream_task_id": self.hparams.downstream_task_id,
+                    "task_name": self.hparams.task_name,
+                    "shuffle_time_sequence": self.hparams.shuffle_time_sequence,
+                    "label_scaling_method": self.hparams.label_scaling_method,
+                    "dtype": 'float16'}
+
+            subject_dict = self.make_subject_dict()
+
+            if os.path.exists(self.split_file_path):
+                train_names, val_names, test_names = self.load_split()
+            else:
+                train_names, val_names, test_names = self.determine_split_randomly(subject_dict)
+
+            if self.hparams.bad_subj_path:
+                bad_subjects = open(self.hparams.bad_subj_path, "r").readlines()
+                for bad_subj in bad_subjects:
+                    bad_subj = bad_subj.strip()
+                    if bad_subj in list(subject_dict.keys()):
+                        print(f'removing bad subject: {bad_subj}')
+                        del subject_dict[bad_subj]
+
+            if self.hparams.limit_training_samples:
+                selected_num = int(self.hparams.limit_training_samples * len(train_names))
+                train_names = np.random.choice(train_names, size=selected_num, replace=False, p=None)
+
+            train_dict = {key: subject_dict[key] for key in train_names if key in subject_dict}
+            val_dict = {key: subject_dict[key] for key in val_names if key in subject_dict}
+            test_dict = {key: subject_dict[key] for key in test_names if key in subject_dict}
+
+            self.train_dataset = Dataset(**params, subject_dict=train_dict, use_augmentations=False, train=True)
+            self.val_dataset = Dataset(**params, subject_dict=val_dict, use_augmentations=False, train=False)
+            self.test_dataset = Dataset(**params, subject_dict=test_dict, use_augmentations=False, train=False)
+
+            print("number of train subjects:", len(train_dict))
+            print("number of val subjects:", len(val_dict))
+            print("number of test subjects:", len(test_dict))
+            print("number of train samples:", len(self.train_dataset.data))
+            print("number of val samples:", len(self.val_dataset.data))
+            print("number of test samples:", len(self.test_dataset.data))
+
         # DistributedSampler is internally called in pl.Trainer
         def get_params(train):
             return {
@@ -567,7 +605,7 @@ class fMRIDataModule(pl.LightningDataModule):
                 "persistent_workers": (train and (self.hparams.strategy == 'ddp')),
                 "shuffle": train
             }
-        
+
         self.train_loader = DataLoader(self.train_dataset, **get_params(train=True))
         self.val_loader = DataLoader(self.val_dataset, **get_params(train=False))
         self.test_loader = DataLoader(self.test_dataset, **get_params(train=False))
