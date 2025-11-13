@@ -176,7 +176,8 @@ CMD="python main.py \
   --clf_head_version $CLF_HEAD_VERSION \
   --attn_drop_rate $ATTN_DROP_RATE \
   --num_workers $NUM_WORKERS \
-  --seed $SEED"
+  --seed $SEED \
+  --loggername tensorboard"
 
 # 添加数据增强
 if [ "$USE_AUGMENTATION" = true ]; then
