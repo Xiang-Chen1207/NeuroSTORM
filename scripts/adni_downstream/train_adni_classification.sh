@@ -78,14 +78,14 @@ LEARNING_RATE=1e-4
 # 权重衰减
 WEIGHT_DECAY=0.01
 
-# Dropout
-DROPOUT=0.1
+# Attention Dropout Rate
+ATTN_DROP_RATE=0.1
 
-# 分类头类型 (v1: 简单线性, v2: MLP, v3: Transformer)
-HEAD_TYPE="v2"
+# 分类头版本 (v1: 简单线性, v2: MLP)
+CLF_HEAD_VERSION="v2"
 
-# 是否冻结编码器 (如果使用预训练模型)
-FREEZE_ENCODER=false
+# 是否冻结特征提取器 (如果使用预训练模型)
+FREEZE_FEATURE_EXTRACTOR=false
 
 # ==================== 预训练模型 (可选) ====================
 
@@ -162,7 +162,7 @@ CMD="python main.py \
   --num_classes $NUM_CLASSES \
   --model $MODEL \
   --embed_dim $EMBED_DIM \
-  --depth $DEPTH \
+  --depths $DEPTH \
   --window_size $WINDOW_SIZE \
   --patch_size $PATCH_SIZE \
   --img_size $IMG_SIZE \
@@ -172,24 +172,28 @@ CMD="python main.py \
   --eval_batch_size $EVAL_BATCH_SIZE \
   --learning_rate $LEARNING_RATE \
   --weight_decay $WEIGHT_DECAY \
-  --output_path $OUTPUT_PATH \
-  --freeze_encoder $FREEZE_ENCODER \
-  --head_type $HEAD_TYPE \
-  --dropout $DROPOUT \
+  --default_root_dir $OUTPUT_PATH \
+  --clf_head_version $CLF_HEAD_VERSION \
+  --attn_drop_rate $ATTN_DROP_RATE \
   --num_workers $NUM_WORKERS \
-  --seed $SEED \
-  --log_type $LOG_TYPE"
+  --seed $SEED"
 
 # 添加数据增强
 if [ "$USE_AUGMENTATION" = true ]; then
   echo "Data augmentation enabled"
-  CMD="$CMD --use_augmentation"
+  CMD="$CMD --augment_during_training"
 fi
 
 # 添加预训练模型（如果存在）
 if [ -n "${PRETRAINED_MODEL:-}" ] && [ -f "$PRETRAINED_MODEL" ]; then
   echo "Loading pretrained model: $PRETRAINED_MODEL"
   CMD="$CMD --load_model_path $PRETRAINED_MODEL"
+
+  # 是否冻结特征提取器
+  if [ "$FREEZE_FEATURE_EXTRACTOR" = true ]; then
+    echo "Freezing feature extractor"
+    CMD="$CMD --freeze_feature_extractor"
+  fi
 else
   echo "Training from scratch (no pretrained model)"
 fi
