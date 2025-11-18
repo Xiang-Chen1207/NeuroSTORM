@@ -305,15 +305,58 @@ class LightningModel(pl.LightningModule):
 
             if self.hparams.num_classes == 2:
                 auroc_func = BinaryAUROC().to(total_out_logits.device)
-                acc = acc_func((subj_avg_logits >= 0).int(), subj_targets)
+                predictions = (subj_avg_logits >= 0).int()
+                acc = acc_func(predictions, subj_targets)
                 # bal_acc_sk = balanced_accuracy_score(subj_targets.cpu(), (subj_avg_logits>=0).int().cpu())
                 auroc = auroc_func(torch.sigmoid(subj_avg_logits), subj_targets)
+
+                # Print predictions for binary classification
+                if self.trainer.is_global_zero:
+                    print(f"\n{'='*80}")
+                    print(f"{mode.upper()} Set - Detailed Predictions (Binary Classification)")
+                    print(f"{'='*80}")
+                    print(f"{'Subject':<50} | {'Pred':<6} | {'True':<6} | {'Logit':<10} | {'Prob':<10} | {'Correct'}")
+                    print(f"{'-'*80}")
+                    correct_count = 0
+                    for i, subj in enumerate(subjects):
+                        pred = predictions[i].item()
+                        true = int(subj_targets[i].item())
+                        logit = subj_avg_logits[i].item()
+                        prob = torch.sigmoid(subj_avg_logits[i]).item()
+                        is_correct = "✓" if pred == true else "✗"
+                        if pred == true:
+                            correct_count += 1
+                        print(f"{subj:<50} | {pred:<6} | {true:<6} | {logit:<10.4f} | {prob:<10.4f} | {is_correct}")
+                    print(f"{'-'*80}")
+                    print(f"Accuracy: {correct_count}/{len(subjects)} = {100*correct_count/len(subjects):.2f}%")
+                    print(f"{'='*80}\n")
+
             elif self.hparams.num_classes > 2:
                 auroc_func = MulticlassAUROC(num_classes=self.hparams.num_classes).to(total_out_logits.device)
+                predictions = subj_avg_logits.max(dim=1)[1]
                 acc = acc_func(subj_avg_logits, subj_targets.long())
                 acc3 = acc3_func(subj_avg_logits, subj_targets.long())
                 # bal_acc_sk = balanced_accuracy_score(subj_targets.cpu(), subj_avg_logits.max(dim=1)[1].int().cpu())
                 auroc = auroc_func(subj_avg_logits, subj_targets.long())
+
+                # Print predictions for multi-class classification
+                if self.trainer.is_global_zero:
+                    print(f"\n{'='*80}")
+                    print(f"{mode.upper()} Set - Detailed Predictions (Multi-class Classification)")
+                    print(f"{'='*80}")
+                    print(f"{'Subject':<50} | {'Pred':<6} | {'True':<6} | {'Correct'}")
+                    print(f"{'-'*80}")
+                    correct_count = 0
+                    for i, subj in enumerate(subjects):
+                        pred = predictions[i].item()
+                        true = int(subj_targets[i].item())
+                        is_correct = "✓" if pred == true else "✗"
+                        if pred == true:
+                            correct_count += 1
+                        print(f"{subj:<50} | {pred:<6} | {true:<6} | {is_correct}")
+                    print(f"{'-'*80}")
+                    print(f"Accuracy: {correct_count}/{len(subjects)} = {100*correct_count/len(subjects):.2f}%")
+                    print(f"{'='*80}\n")
 
                 self.log(f"{mode}_acc3", acc3, sync_dist=True)
 
@@ -322,24 +365,44 @@ class LightningModel(pl.LightningModule):
             self.log(f"{mode}_AUROC", auroc, sync_dist=True)
 
         # regression target is normalized
-        elif self.hparams.downstream_task_type == 'regression':          
+        elif self.hparams.downstream_task_type == 'regression':
             mse = F.mse_loss(subj_avg_logits, subj_targets)
             mae = F.l1_loss(subj_avg_logits, subj_targets)
-            
+
             # reconstruct to original scale
             if self.hparams.label_scaling_method == 'standardization': # default
-                adjusted_mse = F.mse_loss(subj_avg_logits * self.scaler.scale_[0] + self.scaler.mean_[0], subj_targets * self.scaler.scale_[0] + self.scaler.mean_[0])
-                adjusted_mae = F.l1_loss(subj_avg_logits * self.scaler.scale_[0] + self.scaler.mean_[0], subj_targets * self.scaler.scale_[0] + self.scaler.mean_[0])
+                adjusted_predictions = subj_avg_logits * self.scaler.scale_[0] + self.scaler.mean_[0]
+                adjusted_targets = subj_targets * self.scaler.scale_[0] + self.scaler.mean_[0]
+                adjusted_mse = F.mse_loss(adjusted_predictions, adjusted_targets)
+                adjusted_mae = F.l1_loss(adjusted_predictions, adjusted_targets)
             elif self.hparams.label_scaling_method == 'minmax':
-                adjusted_mse = F.mse_loss(subj_avg_logits * (self.scaler.data_max_[0] - self.scaler.data_min_[0]) + self.scaler.data_min_[0], subj_targets * (self.scaler.data_max_[0] - self.scaler.data_min_[0]) + self.scaler.data_min_[0])
-                adjusted_mae = F.l1_loss(subj_avg_logits * (self.scaler.data_max_[0] - self.scaler.data_min_[0]) + self.scaler.data_min_[0], subj_targets * (self.scaler.data_max_[0] - self.scaler.data_min_[0]) + self.scaler.data_min_[0])
+                adjusted_predictions = subj_avg_logits * (self.scaler.data_max_[0] - self.scaler.data_min_[0]) + self.scaler.data_min_[0]
+                adjusted_targets = subj_targets * (self.scaler.data_max_[0] - self.scaler.data_min_[0]) + self.scaler.data_min_[0]
+                adjusted_mse = F.mse_loss(adjusted_predictions, adjusted_targets)
+                adjusted_mae = F.l1_loss(adjusted_predictions, adjusted_targets)
             pearson = PearsonCorrCoef().to(total_out_logits.device)
             prearson_coef = pearson(subj_avg_logits, subj_targets)
-            
+
+            # Print predictions for regression
+            if self.trainer.is_global_zero:
+                print(f"\n{'='*80}")
+                print(f"{mode.upper()} Set - Detailed Predictions (Regression)")
+                print(f"{'='*80}")
+                print(f"{'Subject':<50} | {'Predicted':<12} | {'True':<12} | {'Error':<12}")
+                print(f"{'-'*80}")
+                for i, subj in enumerate(subjects):
+                    pred = adjusted_predictions[i].item()
+                    true = adjusted_targets[i].item()
+                    error = abs(pred - true)
+                    print(f"{subj:<50} | {pred:<12.4f} | {true:<12.4f} | {error:<12.4f}")
+                print(f"{'-'*80}")
+                print(f"MAE: {adjusted_mae.item():.4f}")
+                print(f"{'='*80}\n")
+
             self.log(f"{mode}_corrcoef", prearson_coef, sync_dist=True)
             self.log(f"{mode}_mse", mse, sync_dist=True)
             self.log(f"{mode}_mae", mae, sync_dist=True)
-            self.log(f"{mode}_adjusted_mse", adjusted_mse, sync_dist=True) 
+            self.log(f"{mode}_adjusted_mse", adjusted_mse, sync_dist=True)
             self.log(f"{mode}_adjusted_mae", adjusted_mae, sync_dist=True) 
 
     def training_step(self, batch, batch_idx):
