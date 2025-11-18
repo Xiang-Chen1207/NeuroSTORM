@@ -260,8 +260,12 @@ class LightningModel(pl.LightningModule):
         return loss
 
     def _evaluate_metrics(self, subj_array, total_out_logits, total_out_target, mode):
+        print(f"\n[DEBUG] _evaluate_metrics called for {mode} mode")
+        print(f"[DEBUG] Number of unique subjects: {len(np.unique(subj_array))}")
+        print(f"[DEBUG] Task type: {self.hparams.downstream_task_type}, Num classes: {self.hparams.num_classes}")
+
         subjects = np.unique(subj_array)
-        
+
         subj_avg_logits = []
         subj_targets = []
         # if mode == 'test':
@@ -309,6 +313,8 @@ class LightningModel(pl.LightningModule):
                 acc = acc_func(predictions, subj_targets)
                 # bal_acc_sk = balanced_accuracy_score(subj_targets.cpu(), (subj_avg_logits>=0).int().cpu())
                 auroc = auroc_func(torch.sigmoid(subj_avg_logits), subj_targets)
+
+                print(f"[DEBUG] Binary classification - is_global_zero: {self.trainer.is_global_zero}, num_subjects: {len(subjects)}")
 
                 # Print predictions for binary classification
                 if self.trainer.is_global_zero:
@@ -428,8 +434,10 @@ class LightningModel(pl.LightningModule):
 
     def validation_epoch_end(self, outputs):
         if not self.hparams.pretraining:
+            print(f"\n[DEBUG] validation_epoch_end called with {len(outputs)} dataloaders")
             outputs_valid = outputs[0]
             outputs_test = outputs[1]
+            print(f"[DEBUG] Valid outputs: {len(outputs_valid)}, Test outputs: {len(outputs_test)}")
             subj_valid = []
             subj_test = []
             out_valid_logits_list, out_valid_target_list = [], []
