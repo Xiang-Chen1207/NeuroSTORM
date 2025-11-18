@@ -531,7 +531,86 @@ class TransDiag(BaseDataset):
                 data_tuple = (i, subject, subject_path, start_frame, self.stride, num_frames, target, sex)
                 data.append(data_tuple)
 
-        if self.train: 
+        if self.train:
             self.target_values = np.array([tup[6] for tup in data]).reshape(-1, 1)
-        
+
+        return data
+
+
+class ADNI(BaseDataset):
+    """
+    ADNI dataset for Alzheimer's Disease classification (AD vs CN).
+    Loads .nii.gz files directly and splits them into 20-frame segments.
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def load_sequence(self, subject_path, start_frame, sample_duration, num_frames=None):
+        """
+        Load a sequence directly from .nii.gz file.
+        Args:
+            subject_path: Full path to the .nii.gz file
+            start_frame: Starting frame index
+            sample_duration: Number of frames to load (should be 20)
+            num_frames: Total number of frames in the volume (unused for simplicity)
+        Returns:
+            Tensor of shape (1, H, W, D, 20)
+        """
+        import nibabel as nib
+
+        # Load the entire 4D volume
+        img = nib.load(subject_path)
+        data = img.get_fdata()  # Shape: (H, W, D, T)
+
+        # Extract the sequence [start_frame : start_frame + sample_duration]
+        sequence = data[:, :, :, start_frame:start_frame + sample_duration]
+
+        # Convert to tensor and add batch dimension
+        # Shape: (1, H, W, D, 20)
+        y = torch.from_numpy(sequence).float().unsqueeze(0)
+
+        return y
+
+    def _set_data(self, root, subject_dict):
+        """
+        Set up data list for ADNI dataset.
+        Args:
+            root: Not used - paths are provided directly in subject_dict
+            subject_dict: Dictionary mapping file_path -> [sex, target_label]
+        Returns:
+            List of tuples: (index, subject_name, file_path, start_frame, stride, num_frames, target, sex)
+        """
+        data = []
+
+        for i, file_path in enumerate(subject_dict):
+            sex, target = subject_dict[file_path]
+
+            # Load nii.gz to get the number of frames
+            import nibabel as nib
+            try:
+                img = nib.load(file_path)
+                volume_data = img.get_fdata()
+                num_frames = volume_data.shape[3]  # Time dimension
+
+                # Calculate how many 20-frame segments we can extract
+                # Use continuous splitting: 0-19, 20-39, 40-59, ...
+                # Discard remaining frames that don't fit into a complete segment
+                num_segments = num_frames // self.sequence_length
+
+                # Create one data entry per 20-frame segment
+                for seg_idx in range(num_segments):
+                    start_frame = seg_idx * self.sequence_length
+                    subject_name = os.path.basename(file_path)
+
+                    # Data tuple format: (idx, subject_name, file_path, start_frame, sequence_length, num_frames, target, sex)
+                    data_tuple = (i, subject_name, file_path, start_frame, self.sequence_length, num_frames, target, sex)
+                    data.append(data_tuple)
+
+            except Exception as e:
+                print(f"Error loading {file_path}: {e}")
+                continue
+
+        if self.train:
+            self.target_values = np.array([tup[6] for tup in data]).reshape(-1, 1)
+
         return data

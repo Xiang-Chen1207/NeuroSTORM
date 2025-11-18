@@ -3,7 +3,7 @@ import pytorch_lightning as pl
 import numpy as np
 import pandas as pd
 from torch.utils.data import DataLoader, Subset
-from datasets.fmri_datasets import HCP1200, ABCD, UKB, Cobre, ADHD200, UCLA, HCPEP, HCPTASK, GOD, MOVIE, TransDiag
+from datasets.fmri_datasets import HCP1200, ABCD, UKB, Cobre, ADHD200, UCLA, HCPEP, HCPTASK, GOD, MOVIE, TransDiag, ADNI
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from .parser import str2bool
 
@@ -67,13 +67,15 @@ class fMRIDataModule(pl.LightningDataModule):
         elif self.hparams.dataset_name == 'HCPEP':
             return HCPEP
         elif self.hparams.dataset_name == 'GOD':
-            return GOD 
+            return GOD
         elif self.hparams.dataset_name == 'HCPTASK':
             return HCPTASK
         elif self.hparams.dataset_name == 'MOVIE':
             return MOVIE
         elif self.hparams.dataset_name == 'TransDiag':
             return TransDiag
+        elif self.hparams.dataset_name == 'ADNI':
+            return ADNI
         else:
             raise NotImplementedError
 
@@ -446,7 +448,7 @@ class fMRIDataModule(pl.LightningDataModule):
             subject_list = os.listdir(img_root)
 
             # diagnosis, clinical_variables
-            if self.hparams.task_name == 'diagnosis': 
+            if self.hparams.task_name == 'diagnosis':
                 csv_file = self.hparams.task_name + '.csv'
             else:
                 csv_file = 'clinical_variables.csv'
@@ -457,7 +459,7 @@ class fMRIDataModule(pl.LightningDataModule):
             #     print(result)
 
             meta_data = pd.read_csv(os.path.join(self.hparams.image_path, "metadata", csv_file), encoding='ISO-8859-1')
-            if self.hparams.task_name == 'diagnosis': 
+            if self.hparams.task_name == 'diagnosis':
                 task_name = 'diagnosis'
                 # label_name = 'Group'
                 label_name = 'Diagnostic_Category_Code'
@@ -471,7 +473,7 @@ class fMRIDataModule(pl.LightningDataModule):
             elif task_name == 'clinical_variables':
                 label_name = self.hparams.task_name
                 meta_task = meta_data[['subjectkey', label_name]].dropna()
-            
+
             for subject in subject_list:
                 subject_id = subject[:4] + '_' + subject[4:-5]
                 if subject_id in meta_task['subjectkey'].values:
@@ -494,14 +496,79 @@ class fMRIDataModule(pl.LightningDataModule):
                         if target == 'n/a':
                             import ipdb; ipdb.set_trace()
                             continue
-                    
+
                     target_counts[target] += 1
                     # print('sex = {}, target = {}'.format(sex, target))
                     final_dict[subject] = [sex, target]
-            
+
             for category, count in target_counts.items():
                 print(f"Target {category}: {count}")
             print('Load dataset TransDiag, {} subjects'.format(len(final_dict)))
+
+        elif self.hparams.dataset_name == "ADNI":
+            """
+            ADNI dataset loading from txt files containing file paths.
+            Expected structure:
+            - adni_ad_mni_train.txt: paths to training .nii.gz files
+            - adni_ad_mni_test.txt: paths to test .nii.gz files
+            - adni_ad_mni_val.txt: paths to validation .nii.gz files
+
+            Labels are extracted from file paths (containing 'ad' or 'cn').
+            """
+            # The image_path should point to the directory containing the txt files
+            # or we can use the root path directly
+            txt_files = {
+                'train': os.path.join(self.hparams.image_path, 'adni_ad_mni_train.txt'),
+                'val': os.path.join(self.hparams.image_path, 'adni_ad_mni_val.txt'),
+                'test': os.path.join(self.hparams.image_path, 'adni_ad_mni_test.txt')
+            }
+
+            # Check if txt files exist, if not, look in the default location
+            if not os.path.exists(txt_files['train']):
+                # Try the default location provided by the user
+                txt_files = {
+                    'train': '/mnt/dataset4/DATASETS/fsl_fmri/adni_split/adni_ad_mni_train.txt',
+                    'val': '/mnt/dataset4/DATASETS/fsl_fmri/adni_split/adni_ad_mni_val.txt',
+                    'test': '/mnt/dataset4/DATASETS/fsl_fmri/adni_split/adni_ad_mni_test.txt'
+                }
+
+            # Load all file paths from all splits
+            all_file_paths = []
+            for split_name, txt_file in txt_files.items():
+                if os.path.exists(txt_file):
+                    with open(txt_file, 'r') as f:
+                        paths = [line.strip() for line in f.readlines() if line.strip()]
+                        all_file_paths.extend(paths)
+                else:
+                    print(f"Warning: {txt_file} not found, skipping...")
+
+            # Extract labels from file paths
+            for file_path in all_file_paths:
+                # Extract label from path
+                # The path contains '/ad/' or '/cn/' indicating the class
+                path_lower = file_path.lower()
+
+                if '/ad/' in path_lower or '_ad_' in path_lower:
+                    target = 1  # AD (Alzheimer's Disease)
+                elif '/cn/' in path_lower or '_cn_' in path_lower:
+                    target = 0  # CN (Cognitively Normal)
+                else:
+                    print(f"Warning: Could not extract label from path: {file_path}")
+                    continue
+
+                # Use file path as the key (unique identifier)
+                # Sex is set to 0 as it's not needed for this task
+                sex = 0
+                final_dict[file_path] = [sex, target]
+
+            # Print statistics
+            target_counts = defaultdict(int)
+            for file_path, (sex, target) in final_dict.items():
+                target_counts[target] += 1
+
+            print('Load dataset ADNI, {} subjects'.format(len(final_dict)))
+            print(f"  - AD (label=1): {target_counts[1]} files")
+            print(f"  - CN (label=0): {target_counts[0]} files")
 
         return final_dict
 
