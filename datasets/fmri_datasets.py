@@ -581,16 +581,18 @@ class ADNI(BaseDataset):
             List of tuples: (index, subject_name, file_path, start_frame, stride, num_frames, target, sex)
         """
         data = []
+        total_files = len(subject_dict)
+        print(f"Processing {total_files} ADNI files to create 20-frame segments...")
 
         for i, file_path in enumerate(subject_dict):
             sex, target = subject_dict[file_path]
 
-            # Load nii.gz to get the number of frames
+            # Load nii.gz header to get the number of frames (without loading data)
             import nibabel as nib
             try:
                 img = nib.load(file_path)
-                volume_data = img.get_fdata()
-                num_frames = volume_data.shape[3]  # Time dimension
+                # Use img.shape instead of get_fdata() to avoid loading data into memory
+                num_frames = img.shape[3]  # Time dimension
 
                 # Calculate how many 20-frame segments we can extract
                 # Use continuous splitting: 0-19, 20-39, 40-59, ...
@@ -605,6 +607,10 @@ class ADNI(BaseDataset):
                     # Data tuple format: (idx, subject_name, file_path, start_frame, sequence_length, num_frames, target, sex)
                     data_tuple = (i, subject_name, file_path, start_frame, self.sequence_length, num_frames, target, sex)
                     data.append(data_tuple)
+
+                # Print progress every 50 files
+                if (i + 1) % 50 == 0 or (i + 1) == total_files:
+                    print(f"  Processed {i + 1}/{total_files} files, created {len(data)} segments so far...")
 
             except Exception as e:
                 print(f"Error loading {file_path}: {e}")
