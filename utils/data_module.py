@@ -532,18 +532,18 @@ class fMRIDataModule(pl.LightningDataModule):
                     'test': '/mnt/dataset4/DATASETS/fsl_fmri/adni_split/adni_ad_mni_test.txt'
                 }
 
-            # Load all file paths from all splits
-            all_file_paths = []
+            # Load file paths from each split SEPARATELY to preserve the split
+            split_file_paths = {'train': [], 'val': [], 'test': []}
             for split_name, txt_file in txt_files.items():
                 if os.path.exists(txt_file):
                     with open(txt_file, 'r') as f:
                         paths = [line.strip() for line in f.readlines() if line.strip()]
-                        all_file_paths.extend(paths)
+                        split_file_paths[split_name] = paths
                 else:
                     print(f"Warning: {txt_file} not found, skipping...")
 
-            # Extract labels from file paths
-            for file_path in all_file_paths:
+            # Extract labels from file paths and maintain split information
+            for file_path in split_file_paths['train'] + split_file_paths['val'] + split_file_paths['test']:
                 # Extract label from path
                 # The path contains '/ad/' or '/cn/' indicating the class
                 path_lower = file_path.lower()
@@ -561,6 +561,10 @@ class fMRIDataModule(pl.LightningDataModule):
                 sex = 0
                 final_dict[file_path] = [sex, target]
 
+            # Store the predefined split information
+            # This will be used instead of random splitting
+            self.adni_split_file_paths = split_file_paths
+
             # Print statistics
             target_counts = defaultdict(int)
             for file_path, (sex, target) in final_dict.items():
@@ -569,6 +573,12 @@ class fMRIDataModule(pl.LightningDataModule):
             print('Load dataset ADNI, {} subjects'.format(len(final_dict)))
             print(f"  - AD (label=1): {target_counts[1]} files")
             print(f"  - CN (label=0): {target_counts[0]} files")
+
+            # Print split statistics
+            print(f"\nPredefined split from txt files:")
+            print(f"  - Train: {len(split_file_paths['train'])} files")
+            print(f"  - Val: {len(split_file_paths['val'])} files")
+            print(f"  - Test: {len(split_file_paths['test'])} files")
 
         return final_dict
 
@@ -591,8 +601,14 @@ class fMRIDataModule(pl.LightningDataModule):
                 "dtype": 'float16'}
         
         subject_dict = self.make_subject_dict()
-        
-        if os.path.exists(self.split_file_path):
+
+        # For ADNI dataset, use predefined split from txt files
+        if self.hparams.dataset_name == "ADNI" and hasattr(self, 'adni_split_file_paths'):
+            print("\n[INFO] Using predefined ADNI split from txt files (not random split)")
+            train_names = self.adni_split_file_paths['train']
+            val_names = self.adni_split_file_paths['val']
+            test_names = self.adni_split_file_paths['test']
+        elif os.path.exists(self.split_file_path):
             train_names, val_names, test_names = self.load_split()
         else:
             train_names, val_names, test_names = self.determine_split_randomly(subject_dict)
