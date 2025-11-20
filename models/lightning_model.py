@@ -310,26 +310,58 @@ class LightningModel(pl.LightningModule):
                 # bal_acc_sk = balanced_accuracy_score(subj_targets.cpu(), (subj_avg_logits>=0).int().cpu())
                 auroc = auroc_func(torch.sigmoid(subj_avg_logits), subj_targets)
 
-                # Print predictions for binary classification
+                # Print and save predictions for binary classification
                 if self.trainer.is_global_zero:
                     print(f"\n{'='*80}")
                     print(f"{mode.upper()} Set - Detailed Predictions (Binary Classification)")
                     print(f"{'='*80}")
                     print(f"{'Subject':<50} | {'Pred':<6} | {'True':<6} | {'Logit':<10} | {'Prob':<10} | {'Correct'}")
                     print(f"{'-'*80}")
+
+                    # Collect predictions for saving to file
+                    predictions_data = []
                     correct_count = 0
+
                     for i, subj in enumerate(subjects):
                         pred = predictions[i].item()
                         true = int(subj_targets[i].item())
                         logit = subj_avg_logits[i].item()
                         prob = torch.sigmoid(subj_avg_logits[i]).item()
-                        is_correct = "✓" if pred == true else "✗"
+                        is_correct = 1 if pred == true else 0
+                        is_correct_symbol = "✓" if pred == true else "✗"
+
                         if pred == true:
                             correct_count += 1
-                        print(f"{subj:<50} | {pred:<6} | {true:<6} | {logit:<10.4f} | {prob:<10.4f} | {is_correct}")
+
+                        # Print to console
+                        print(f"{subj:<50} | {pred:<6} | {true:<6} | {logit:<10.4f} | {prob:<10.4f} | {is_correct_symbol}")
+
+                        # Collect data for CSV
+                        predictions_data.append({
+                            'subject': subj,
+                            'predicted_label': pred,
+                            'true_label': true,
+                            'logit': logit,
+                            'probability': prob,
+                            'correct': is_correct
+                        })
+
                     print(f"{'-'*80}")
                     print(f"Accuracy: {correct_count}/{len(subjects)} = {100*correct_count/len(subjects):.2f}%")
                     print(f"{'='*80}\n")
+
+                    # Save predictions to CSV file
+                    import pandas as pd
+                    df = pd.DataFrame(predictions_data)
+
+                    # Create predictions directory if it doesn't exist
+                    predictions_dir = os.path.join(self.hparams.default_root_dir, 'predictions')
+                    os.makedirs(predictions_dir, exist_ok=True)
+
+                    # Save with epoch and mode in filename
+                    csv_filename = os.path.join(predictions_dir, f'predictions_{mode}_epoch{self.current_epoch}.csv')
+                    df.to_csv(csv_filename, index=False)
+                    print(f"[INFO] Predictions saved to: {csv_filename}\n")
 
             elif self.hparams.num_classes > 2:
                 auroc_func = MulticlassAUROC(num_classes=self.hparams.num_classes).to(total_out_logits.device)
@@ -339,24 +371,54 @@ class LightningModel(pl.LightningModule):
                 # bal_acc_sk = balanced_accuracy_score(subj_targets.cpu(), subj_avg_logits.max(dim=1)[1].int().cpu())
                 auroc = auroc_func(subj_avg_logits, subj_targets.long())
 
-                # Print predictions for multi-class classification
+                # Print and save predictions for multi-class classification
                 if self.trainer.is_global_zero:
                     print(f"\n{'='*80}")
                     print(f"{mode.upper()} Set - Detailed Predictions (Multi-class Classification)")
                     print(f"{'='*80}")
                     print(f"{'Subject':<50} | {'Pred':<6} | {'True':<6} | {'Correct'}")
                     print(f"{'-'*80}")
+
+                    # Collect predictions for saving to file
+                    predictions_data = []
                     correct_count = 0
+
                     for i, subj in enumerate(subjects):
                         pred = predictions[i].item()
                         true = int(subj_targets[i].item())
-                        is_correct = "✓" if pred == true else "✗"
+                        is_correct = 1 if pred == true else 0
+                        is_correct_symbol = "✓" if pred == true else "✗"
+
                         if pred == true:
                             correct_count += 1
-                        print(f"{subj:<50} | {pred:<6} | {true:<6} | {is_correct}")
+
+                        # Print to console
+                        print(f"{subj:<50} | {pred:<6} | {true:<6} | {is_correct_symbol}")
+
+                        # Collect data for CSV
+                        predictions_data.append({
+                            'subject': subj,
+                            'predicted_label': pred,
+                            'true_label': true,
+                            'correct': is_correct
+                        })
+
                     print(f"{'-'*80}")
                     print(f"Accuracy: {correct_count}/{len(subjects)} = {100*correct_count/len(subjects):.2f}%")
                     print(f"{'='*80}\n")
+
+                    # Save predictions to CSV file
+                    import pandas as pd
+                    df = pd.DataFrame(predictions_data)
+
+                    # Create predictions directory if it doesn't exist
+                    predictions_dir = os.path.join(self.hparams.default_root_dir, 'predictions')
+                    os.makedirs(predictions_dir, exist_ok=True)
+
+                    # Save with epoch and mode in filename
+                    csv_filename = os.path.join(predictions_dir, f'predictions_{mode}_epoch{self.current_epoch}.csv')
+                    df.to_csv(csv_filename, index=False)
+                    print(f"[INFO] Predictions saved to: {csv_filename}\n")
 
                 self.log(f"{mode}_acc3", acc3, sync_dist=True)
 
@@ -383,21 +445,49 @@ class LightningModel(pl.LightningModule):
             pearson = PearsonCorrCoef().to(total_out_logits.device)
             prearson_coef = pearson(subj_avg_logits, subj_targets)
 
-            # Print predictions for regression
+            # Print and save predictions for regression
             if self.trainer.is_global_zero:
                 print(f"\n{'='*80}")
                 print(f"{mode.upper()} Set - Detailed Predictions (Regression)")
                 print(f"{'='*80}")
                 print(f"{'Subject':<50} | {'Predicted':<12} | {'True':<12} | {'Error':<12}")
                 print(f"{'-'*80}")
+
+                # Collect predictions for saving to file
+                predictions_data = []
+
                 for i, subj in enumerate(subjects):
                     pred = adjusted_predictions[i].item()
                     true = adjusted_targets[i].item()
                     error = abs(pred - true)
+
+                    # Print to console
                     print(f"{subj:<50} | {pred:<12.4f} | {true:<12.4f} | {error:<12.4f}")
+
+                    # Collect data for CSV
+                    predictions_data.append({
+                        'subject': subj,
+                        'predicted_value': pred,
+                        'true_value': true,
+                        'absolute_error': error
+                    })
+
                 print(f"{'-'*80}")
                 print(f"MAE: {adjusted_mae.item():.4f}")
                 print(f"{'='*80}\n")
+
+                # Save predictions to CSV file
+                import pandas as pd
+                df = pd.DataFrame(predictions_data)
+
+                # Create predictions directory if it doesn't exist
+                predictions_dir = os.path.join(self.hparams.default_root_dir, 'predictions')
+                os.makedirs(predictions_dir, exist_ok=True)
+
+                # Save with epoch and mode in filename
+                csv_filename = os.path.join(predictions_dir, f'predictions_{mode}_epoch{self.current_epoch}.csv')
+                df.to_csv(csv_filename, index=False)
+                print(f"[INFO] Predictions saved to: {csv_filename}\n")
 
             self.log(f"{mode}_corrcoef", prearson_coef, sync_dist=True)
             self.log(f"{mode}_mse", mse, sync_dist=True)
